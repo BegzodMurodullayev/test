@@ -41,6 +41,7 @@ from aiogram.types import (
 BOT_TOKEN = os.getenv("BOT_TOKEN", "8849782338:AAEIhUpWwmvmfT6Gf4lRuAHQo06h1wObMjg")
 ADMIN_ID = int(os.getenv("ADMIN_ID", "8353322906"))
 DB_PATH = os.getenv("DB_PATH", "bot.db")
+WEBAPP_URL = os.getenv("WEBAPP_URL", "")  # Render URL: https://your-app.onrender.com
 
 router = Router()
 ANIMATED_MAIL_EMOJI = "📨"
@@ -460,7 +461,15 @@ async def cmd_admin(message: Message):
     if not message.from_user or message.from_user.id != ADMIN_ID:
         await message.answer("Bu buyruq faqat admin uchun.")
         return
-    await message.answer("<b>👑 Admin panelga xush kelibsiz!</b> Web App orqali barcha foydalanuvchilar va xabarlarni ko'rishingiz mumkin.")
+    if WEBAPP_URL:
+        kb = InlineKeyboardMarkup(
+            inline_keyboard=[
+                [InlineKeyboardButton(text="🗂 Boshqaruv Paneli", web_app=WebAppInfo(url=WEBAPP_URL))]
+            ]
+        )
+        await message.answer("<b>👑 Admin panelga xush kelibsiz!</b>", reply_markup=kb)
+    else:
+        await message.answer("<b>👑 Admin panel:</b>\n\n⚠️ WEBAPP_URL sozlanmagan. Render URL ni bot.py da 44-qatorga yozing.")
 
 
 # ==================================================
