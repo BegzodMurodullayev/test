@@ -35,13 +35,25 @@ from aiogram.types import (
 
 
 # ==================================================
-# SOZLAMALAR
+# SOZLAMALAR — Render.com Environment Variables dan o'qiladi
 # ==================================================
 
-BOT_TOKEN = os.getenv("BOT_TOKEN", "8849782338:AAEIhUpWwmvmfT6Gf4lRuAHQo06h1wObMjg")
-ADMIN_ID = int(os.getenv("ADMIN_ID", "8353322906"))
+BOT_TOKEN = os.getenv("BOT_TOKEN", "")
+ADMIN_ID = int(os.getenv("ADMIN_ID", "0"))
 DB_PATH = os.getenv("DB_PATH", "bot.db")
-WEBAPP_URL = os.getenv("WEBAPP_URL", "")  # Render URL: https://your-app.onrender.com
+
+# WEBAPP_URL avtomatik aniqlanadi:
+# 1) WEBAPP_URL env var berilgan bo'lsa — shu ishlatiladi
+# 2) Aks holda RENDER_EXTERNAL_URL (Render.com avtomatik beradi)
+WEBAPP_URL = os.getenv("WEBAPP_URL", "") or os.getenv("RENDER_EXTERNAL_URL", "")
+
+# Tekshirish — BOT_TOKEN bo'lmasa ishga tushmaydi
+if not BOT_TOKEN:
+    raise RuntimeError(
+        "BOT_TOKEN topilmadi!\n"
+        "Render > Environment > BOT_TOKEN = sizning_token\n"
+        "Yoki lokal: export BOT_TOKEN=sizning_token"
+    )
 
 router = Router()
 ANIMATED_MAIL_EMOJI = "📨"
@@ -144,7 +156,6 @@ def is_blocked(owner_id: int, sender_id: int) -> bool:
 
 # ==================================================
 # TELEGRAM MINI APP MA'LUMOTLARINI TEKSHIRISH
-# FIX: hmac.new() o'rniga to'g'ri hmac.new() sintaksisi
 # ==================================================
 
 def verify_telegram_web_app_data(init_data: str) -> dict | None:
@@ -157,7 +168,6 @@ def verify_telegram_web_app_data(init_data: str) -> dict | None:
         hash_check = parsed_data.pop("hash")
         data_check_string = "\n".join(f"{key}={value}" for key, value in sorted(parsed_data.items()))
 
-        # FIX: hmac.new(key, msg, digestmod) to'g'ri Python sintaksisi
         secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
         calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
 
@@ -197,12 +207,14 @@ def link_text(username: str, user_id: int) -> str:
 def start_keyboard(link: str, bot_username: str) -> InlineKeyboardMarkup:
     share = f"https://t.me/share/url?url={quote(link)}&text={quote('Menga anonim xabar yuboring 👇')}"
     add_channel_url = f"https://t.me/{bot_username}?startgroup=true&startchannel=true&admin=post_messages"
-    return InlineKeyboardMarkup(
-        inline_keyboard=[
-            [InlineKeyboardButton(text="Ulashish ↗", url=share)],
-            [InlineKeyboardButton(text="Kanalga ulash", url=add_channel_url)],
-        ]
-    )
+    buttons = [
+        [InlineKeyboardButton(text="Ulashish ↗", url=share)],
+        [InlineKeyboardButton(text="Kanalga ulash", url=add_channel_url)],
+    ]
+    # Web App tugmasi — faqat WEBAPP_URL mavjud bo'lsa
+    if WEBAPP_URL:
+        buttons.append([InlineKeyboardButton(text="🗂 Boshqaruv Paneli", web_app=WebAppInfo(url=WEBAPP_URL))])
+    return InlineKeyboardMarkup(inline_keyboard=buttons)
 
 
 def cancel_keyboard() -> InlineKeyboardMarkup:
@@ -263,23 +275,33 @@ async def handle_web_app(request):
         * { box-sizing: border-box; }
         body { margin: 0; padding: 16px; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; background: var(--bg-color); color: var(--text-color); }
         h2 { margin: 0 0 12px; font-size: 20px; }
-        .toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
-        button { border: 0; border-radius: 9px; padding: 10px 14px; background: var(--card-bg); color: var(--text-color); font-size: 14px; cursor: pointer; font-weight: 600; }
+        .toolbar { display: flex; gap: 8px; margin-bottom: 14px; flex-wrap: wrap; }
+        button { border: 0; border-radius: 9px; padding: 10px 14px; background: var(--card-bg); color: var(--text-color); font-size: 14px; cursor: pointer; font-weight: 600; transition: background .2s; }
+        button:active { opacity: .7; }
         button.active { background: var(--accent-color); color: #fff; }
-        .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; margin-bottom: 12px; }
+        .card { background: var(--card-bg); border: 1px solid var(--border-color); border-radius: 12px; padding: 14px; margin-bottom: 12px; animation: fadeIn .3s ease; }
+        @keyframes fadeIn { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: translateY(0); } }
         .card-header { display: flex; justify-content: space-between; margin-bottom: 6px; color: var(--hint-color); font-size: 12px; }
         .card-body { font-size: 14px; line-height: 1.4; overflow-wrap: anywhere; white-space: pre-wrap; }
         a { color: #60a5fa; text-decoration: none; }
         .loading, .empty, .error { text-align: center; padding: 32px 18px; color: var(--hint-color); }
         .error { color: #fca5a5; }
+        .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 16px; }
+        .stat-card { background: var(--card-bg); border-radius: 10px; padding: 12px; text-align: center; }
+        .stat-num { font-size: 24px; font-weight: 700; color: var(--accent-color); }
+        .stat-label { font-size: 12px; color: var(--hint-color); margin-top: 4px; }
     </style>
 </head>
 <body>
     <main>
         <h2>🗂 Boshqaruv Paneli</h2>
+        <div class="stats" id="stats-block" style="display:none;">
+            <div class="stat-card"><div class="stat-num" id="stat-users">0</div><div class="stat-label">Foydalanuvchilar</div></div>
+            <div class="stat-card"><div class="stat-num" id="stat-msgs">0</div><div class="stat-label">Xabarlar</div></div>
+        </div>
         <div class="toolbar" id="admin-tabs" style="display:none;">
             <button id="tab-msgs" class="active" onclick="switchTab('msgs')">📥 Xabarlar</button>
-            <button id="tab-users" onclick="switchTab('users')">👥 Foydalanuvchilar (<span id="user-count">0</span>)</button>
+            <button id="tab-users" onclick="switchTab('users')">👥 Foydalanuvchilar</button>
         </div>
         <div class="toolbar"><button id="refresh-btn" type="button" onclick="loadData()">🔄 Yangilash</button></div>
         <section id="content-list"><div class="loading">Ma'lumotlar yuklanmoqda...</div></section>
@@ -300,12 +322,18 @@ async def handle_web_app(request):
             renderData();
         }
 
+        function escapeHtml(text) {
+            const d = document.createElement('div');
+            d.textContent = text;
+            return d.innerHTML;
+        }
+
         async function loadData() {
             if (!tg || !tg.initData) {
-                listEl.innerHTML = '<div class="error">Telegram ma\\'lumotlari topilmadi. Bot ichidan oching.</div>';
+                listEl.innerHTML = '<div class="error">⚠️ Telegram ichidan oching!<br><br><small>Bu sahifa faqat botdagi tugma orqali ochiladi.</small></div>';
                 return;
             }
-            listEl.innerHTML = '<div class="loading">Yuklanmoqda...</div>';
+            listEl.innerHTML = '<div class="loading">⏳ Yuklanmoqda...</div>';
             try {
                 const response = await fetch('/api/data', {
                     method: 'POST',
@@ -314,17 +342,19 @@ async def handle_web_app(request):
                 });
                 const result = await response.json();
                 if (!response.ok || !result.ok) {
-                    listEl.innerHTML = `<div class="error">${result.error || 'Server xatosi'}</div>`;
+                    listEl.innerHTML = '<div class="error">' + escapeHtml(result.error || 'Server xatosi') + '</div>';
                     return;
                 }
                 cachedData = result;
                 if (result.is_admin) {
                     document.getElementById('admin-tabs').style.display = 'flex';
-                    document.getElementById('user-count').textContent = result.users ? result.users.length : 0;
+                    document.getElementById('stats-block').style.display = 'grid';
+                    document.getElementById('stat-users').textContent = result.users ? result.users.length : 0;
+                    document.getElementById('stat-msgs').textContent = result.messages ? result.messages.length : 0;
                 }
                 renderData();
             } catch (err) {
-                listEl.innerHTML = '<div class="error">Serverga ulanib bo\\'lmadi.</div>';
+                listEl.innerHTML = '<div class="error">Serverga ulanib bo\\'lmadi.<br><small>' + escapeHtml(err.message) + '</small></div>';
             }
         }
 
@@ -333,31 +363,29 @@ async def handle_web_app(request):
             if (cachedData.is_admin && currentTab === 'users') {
                 const users = cachedData.users || [];
                 if (users.length === 0) {
-                    listEl.innerHTML = '<div class="empty">Hali foydalanuvchilar yoq 📭</div>';
+                    listEl.innerHTML = '<div class="empty">Hali foydalanuvchilar yo\\'q 📭</div>';
                     return;
                 }
-                listEl.innerHTML = users.map((u, index) => `
-                    <div class="card">
-                        <div class="card-header"><span>👤 #${index + 1} · ID: ${u.user_id}</span><time>${u.created}</time></div>
-                        <div class="card-body">
-                            <b>Ism:</b> ${u.full_name || "Noma'lum"}<br>
-                            <b>Username:</b> ${u.username ? '@' + u.username : 'Mavjud emas'}<br>
-                            <b>Profil:</b> <a href="tg://user?id=${u.user_id}">Telegram Profilni Ochish</a>
-                        </div>
-                    </div>
-                `).join('');
+                listEl.innerHTML = users.map((u, i) =>
+                    '<div class="card">' +
+                    '<div class="card-header"><span>👤 #' + (i+1) + ' · ID: ' + u.user_id + '</span><time>' + escapeHtml(u.created || '') + '</time></div>' +
+                    '<div class="card-body">' +
+                    '<b>Ism:</b> ' + escapeHtml(u.full_name || "Noma'lum") + '<br>' +
+                    '<b>Username:</b> ' + (u.username ? '@' + escapeHtml(u.username) : 'Mavjud emas') + '<br>' +
+                    '<b>Profil:</b> <a href="tg://user?id=' + u.user_id + '">Ochish</a>' +
+                    '</div></div>'
+                ).join('');
             } else {
                 const messages = cachedData.messages || [];
                 if (messages.length === 0) {
-                    listEl.innerHTML = '<div class="empty">Hali xabarlar tarixi bo\\'sh 📭</div>';
+                    listEl.innerHTML = '<div class="empty">Hali xabarlar yo\\'q 📭</div>';
                     return;
                 }
-                listEl.innerHTML = messages.map((m, index) => `
-                    <div class="card">
-                        <div class="card-header"><span>📌 Xabar #${index + 1} (ID: ${m.id})</span><time>${m.created}</time></div>
-                        <div class="card-body">${m.text}</div>
-                    </div>
-                `).join('');
+                listEl.innerHTML = messages.map((m, i) =>
+                    '<div class="card">' +
+                    '<div class="card-header"><span>📌 #' + (i+1) + '</span><time>' + escapeHtml(m.created || '') + '</time></div>' +
+                    '<div class="card-body">' + escapeHtml(m.text || '') + '</div></div>'
+                ).join('');
             }
         }
         loadData();
@@ -425,6 +453,14 @@ async def handle_get_data(request):
         return web.json_response({"ok": False, "error": "Server xatosi."}, status=500)
 
 
+# ==================================================
+# HEALTH CHECK — Render uxlamasligi uchun
+# ==================================================
+
+async def handle_health(request):
+    return web.json_response({"status": "ok", "bot": "running"})
+
+
 @web.middleware
 async def cors_middleware(request, handler):
     if request.method == "OPTIONS":
@@ -453,7 +489,7 @@ async def on_bot_chat_member(event: ChatMemberUpdated):
 
 
 # ==================================================
-# ADMIN PANEL (TELEGRAM CHAT)
+# ADMIN PANEL
 # ==================================================
 
 @router.message(Command("admin"))
@@ -469,7 +505,11 @@ async def cmd_admin(message: Message):
         )
         await message.answer("<b>👑 Admin panelga xush kelibsiz!</b>", reply_markup=kb)
     else:
-        await message.answer("<b>👑 Admin panel:</b>\n\n⚠️ WEBAPP_URL sozlanmagan. Render URL ni bot.py da 44-qatorga yozing.")
+        await message.answer(
+            "<b>👑 Admin panel</b>\n\n"
+            "⚠️ WEBAPP_URL aniqlanmadi.\n"
+            "Render > Environment > WEBAPP_URL qo'shing."
+        )
 
 
 # ==================================================
@@ -477,10 +517,6 @@ async def cmd_admin(message: Message):
 # ==================================================
 
 async def send_own_link(message: Message, bot: Bot, user=None):
-    """
-    FIX: user parametri qo'shildi — callback querydan chaqirilganda
-    cb.message.from_user bot bo'ladi, shuning uchun haqiqiy userni tashqaridan beramiz.
-    """
     actual_user = user if user is not None else (message.from_user if message else None)
     if not actual_user:
         return
@@ -529,7 +565,6 @@ async def cb_cancel_action(cb: CallbackQuery, state: FSMContext, bot: Bot):
             await cb.message.delete()
         except Exception:
             pass
-        # FIX: cb.from_user ni uzatamiz, chunki cb.message.from_user = bot
         await send_own_link(cb.message, bot, user=cb.from_user)
     await cb.answer("Bekor qilindi.")
 
@@ -688,7 +723,6 @@ async def fallback(message: Message, bot: Bot):
 
 # ==================================================
 # ASOSIY DASTUR
-# FIX: polling va web server bir vaqtda, to'g'ri asyncio task boshqaruvi
 # ==================================================
 
 async def main():
@@ -697,14 +731,17 @@ async def main():
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
     )
     init_db()
+    logging.info(f"WEBAPP_URL = {WEBAPP_URL or '(aniqlanmadi)'}")
+    logging.info(f"ADMIN_ID = {ADMIN_ID}")
 
     bot = Bot(BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
     dp = Dispatcher(storage=MemoryStorage())
     dp.include_router(router)
 
-    # Web server sozlash
+    # Web server
     app = web.Application(middlewares=[cors_middleware])
     app.router.add_get("/", handle_web_app)
+    app.router.add_get("/health", handle_health)
     app.router.add_post("/api/data", handle_get_data)
 
     runner = web.AppRunner(app)
@@ -716,10 +753,8 @@ async def main():
     logging.info(f"Web server {port}-portda ishga tushdi.")
 
     try:
-        # Webhook tozalash
         await bot.delete_webhook(drop_pending_updates=True)
         logging.info("Bot polling boshlanmoqda...")
-        # FIX: polling va server parallel ishlaydi
         await dp.start_polling(bot, allowed_updates=dp.resolve_used_update_types())
     finally:
         logging.info("Bot to'xtatilmoqda...")
